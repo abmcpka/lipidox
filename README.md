@@ -23,7 +23,7 @@ Dockerfile                single-container image (Python 3.12)
 | Field | Value |
 |---|---|
 | Project name | LipidoX (LipidPortal v4) |
-| Project home page | https://github.com/pda-apd/lipidox |
+| Project home page | https://github.com/abmcpka/lipidox |
 | Operating system(s) | Platform independent (Docker); Linux, macOS, Windows (Python) |
 | Programming language | Python 3.12 (backend), JavaScript (frontend) |
 | Other requirements | Docker 20+, or Python 3.12 with the packages in `backend/requirements.txt`. The pathway / GATOM / lipid-reaction network module additionally requires R with the LipidSigR package; it is disabled automatically when `Rscript` is not available. |

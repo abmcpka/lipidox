@@ -70,7 +70,7 @@ de-identified.
 
 ## Related resources
 
-- LipidoX source code, version 1.1.0: https://github.com/pda-apd/lipidox
+- LipidoX source code, version 1.1.0: https://github.com/abmcpka/lipidox
 - The manuscript describing the platform.
 
 ## License

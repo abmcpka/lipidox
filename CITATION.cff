@@ -6,10 +6,10 @@ version: 1.1.0
 date-released: 2026-11-11
 license: MIT
 type: software
-repository-code: "https://github.com/pda-apd/lipidox"
+repository-code: "https://github.com/abmcpka/lipidox"
 identifiers:
   - type: url
-    value: "https://github.com/pda-apd/lipidox/releases/tag/v1.1.0"
+    value: "https://github.com/abmcpka/lipidox/releases/tag/v1.1.0"
     description: "Versioned release"
 keywords:
   - lipidomics
