@@ -1,8 +1,7 @@
 # LipidoX
 
 LipidoX is a self-hosted web platform for LC-MS/MS lipidomics data processing,
-statistical analysis, and interactive visualization. This repository holds the
-source code (v1.1.0) released with the accompanying manuscript.
+statistical analysis, and interactive visualization.
 
 ## Repository layout
 
