@@ -26,7 +26,7 @@ Dockerfile                single-container image (Python 3.12)
 | Operating system(s) | Platform independent (Docker); Linux, macOS, Windows (Python) |
 | Programming language | Python 3.12 (backend), JavaScript (frontend) |
 | Other requirements | Docker 20+, or Python 3.12 with the packages in `backend/requirements.txt`. The pathway / GATOM / lipid-reaction network module additionally requires R with the LipidSigR package; it is disabled automatically when `Rscript` is not available. |
-| License | MIT for the source code; CC0 1.0 for both demonstration datasets (see `LICENSE` and the `LICENSE.txt` in each dataset folder) |
+| License | MIT for the source code; CC0 1.0 for both demonstration datasets |
 
 ## Run with Docker
 
@@ -66,12 +66,14 @@ Hepatitis, Cirrhosis); only the feature set differs.
 Each folder contains `matrix.csv` (internal-standard and NIST SRM 1950-normalized
 intensities, rounded to five decimal places; the file the interface loads),
 `matrix_raw.csv` (the same samples before normalization), `meta.csv` (age, sex,
-AST, ALT, RBC, HGB, WBC and group) and the dataset documentation. The
+AST, ALT, RBC, HGB, WBC and group). The
 341-feature folder additionally contains `feature_map.csv`, which records the
 measured species names summed into each feature.
 
-Both datasets are de-identified. The ethics approvals are listed in the
-`README.md` of each dataset folder.
+Both datasets are de-identified. The study was approved by the Ethics
+Committees in Biomedical Research of Bach Mai Hospital, Hanoi, Vietnam
+(Approval No. 7197/BM-HĐĐĐ) and Hanoi Medical University, Hanoi, Vietnam
+(Approval No. 1826/BB-HĐĐĐ).
 
 ## Analysis modules
 
@@ -98,9 +100,8 @@ Both datasets are de-identified. The ethics approvals are listed in the
 ## Licensing and citation
 
 The source code is released under the MIT License. The two demonstration
-datasets in `backend/example_seed/Example/` are released under CC0 1.0 (see
-the `LICENSE.txt` in each dataset folder). Citation metadata is provided in
-`CITATION.cff`.
+datasets in `backend/example_seed/Example/` are released under CC0 1.0.
+Citation metadata is provided in `CITATION.cff`.
 If you use LipidoX in published work, please cite the manuscript and the
 versioned release (v1.1.0).
 
