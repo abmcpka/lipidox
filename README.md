@@ -95,19 +95,6 @@ Both datasets are de-identified. The ethics approvals are listed in the
 - **Lipid ID conversion**: pygoslin-based name parsing with locally bundled
   annotation snapshots.
 
-## Deployment notes
-
-- `JWT_SECRET` is generated and persisted at `<DATA_DIR>/.jwt_secret` when it is
-  not supplied; set it explicitly when several instances share a database.
-- The interactive API documentation is disabled. Set `ENABLE_DOCS=1` to expose
-  `/docs` on a private instance.
-- `MAX_UPLOAD_MB` and `PROJECT_QUOTA_MB` bound disk use per upload and per
-  project; `ALLOWED_HOSTS` restricts the accepted `Host` header; `CORS_ORIGINS`
-  defaults to local development origins rather than `*`.
-- Database and storage backups can be encrypted with `BACKUP_ENCRYPTION_KEY`.
-- The container runs as an unprivileged user (UID 1000) and keeps its state in
-  the `/data` volume.
-
 ## Licensing and citation
 
 The source code is released under the MIT License. The two demonstration
