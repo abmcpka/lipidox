@@ -22,7 +22,7 @@ Dockerfile                single-container image (Python 3.12)
 
 | Field | Value |
 |---|---|
-| Project name | LipidoX (LipidPortal v4) |
+| Project name | LipidoX (LipidPortal) |
 | Project home page | https://github.com/abmcpka/lipidox |
 | Operating system(s) | Platform independent (Docker); Linux, macOS, Windows (Python) |
 | Programming language | Python 3.12 (backend), JavaScript (frontend) |
