@@ -36,8 +36,6 @@ docker build -t lipidox .
 docker run -p 7860:7860 -e JWT_SECRET="$(python -c 'import secrets;print(secrets.token_hex(32))')" -v lipidox_data:/data lipidox
 ```
 
-Then open `http://localhost:7860/register.html` and create an account.
-
 ## Run locally
 
 ```bash
