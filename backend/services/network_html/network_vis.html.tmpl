@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <title>@@TITLE@@</title>
 <script src="https://unpkg.com/vis-network@10.1.5/standalone/umd/vis-network.min.js" integrity="sha384-GtjYkhwhAE+SrjDGQbQux3taYY5IiPH6XHwwKXF+WdyoI1hp193Dg+3BoQDfF7VH" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
 <style>
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -80,6 +79,9 @@
   .ctx-menu div { padding: 6px 14px; cursor: pointer; font-size: 12px; }
   .ctx-menu div:hover { background: #e8e8e8; }
   .hint { color: #6d7b8b; font-size: 11px; }
+  #previewModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 10050; overflow: auto; }
+  #previewCard { background: #fff; max-width: 960px; margin: 24px auto; padding: 12px; border-radius: 8px; }
+  #previewImg { max-width: 100%; max-height: 70vh; display: block; margin: 8px auto; }
 </style>
 </head>
 <body>
@@ -154,13 +156,26 @@
       <button type="button" class="seg-btn" data-fmt="png" onclick="setFormat('png')">PNG</button>
     </div>
   </div>
-  <div class="cfg-note">SVG: vector (recommended). PNG: raster ×6 scale.</div>
-  <button type="button" class="cfg-btn" id="downloadImageBtn" onclick="exportImage()"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.25 1.5h1.5v6.69l2.22-2.22 1.06 1.06L8 11.06 3.97 7.03l1.06-1.06 2.22 2.22V1.5z"/><path d="M2.5 12.5h11V14h-11z"/></svg>Download SVG</button>
+  <div class="cfg-field" id="pngScaleRow">
+    <div class="row"><span>PNG scale</span><b id="dpiScaleVal">6</b></div>
+    <input type="range" id="dpiScale" min="1" max="10" step="1" value="6" oninput="syncExportUI()">
+  </div>
+  <div class="cfg-note">SVG: vector, exactly what the page shows. PNG: the same view rasterised at the chosen scale.</div>
+  <button type="button" class="cfg-btn secondary" id="previewImageBtn" onclick="previewExport()">Preview</button>
+  <button type="button" class="cfg-btn" id="downloadImageBtn" onclick="downloadFigure()"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.25 1.5h1.5v6.69l2.22-2.22 1.06 1.06L8 11.06 3.97 7.03l1.06-1.06 2.22 2.22V1.5z"/><path d="M2.5 12.5h11V14h-11z"/></svg>Download SVG</button>
 </div>
 <div class="ctx-menu" id="ctxMenu">
   <div onclick="highlightConnected()">Highlight 1-hop neighbors</div>
   <div onclick="highlightAllPathsForNode()">Highlight all paths containing this node</div>
   <div onclick="resetHighlight()">Reset</div>
+</div>
+
+<div id="previewModal">
+  <div id="previewCard">
+    <button type="button" onclick="closePreview()" style="float:right;border:none;background:#eee;border-radius:4px;padding:2px 10px;cursor:pointer;">&times; close</button>
+    <div class="hint" id="previewNote"></div>
+    <img id="previewImg" alt="Export preview">
+  </div>
 </div>
 
 <script>
@@ -744,44 +759,11 @@ function setMode(mode) {
   network.stabilize(200);
 }
 
-// ----- Export image (SVG vector or PNG at fixed ×6) -----
-const PNG_SCALE = 6;
-
+// ----- Export image (SVG vector or PNG at a chosen scale) -----
 function setFormat(fmt) {
   document.querySelectorAll('#fmtSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.fmt === fmt));
   document.getElementById('downloadImageBtn').lastChild.textContent = fmt === 'png' ? 'Download PNG' : 'Download SVG';
-}
-
-function exportImage() {
-  const active = document.querySelector('#fmtSeg .seg-btn.active');
-  if (active && active.dataset.fmt === 'png') exportPNG();
-  else exportSVGVector();
-}
-
-function exportPNG() {
-  // Build vector SVG (sharp) then render to canvas → PNG
-  const svgStr = buildVectorSVGString(true);
-  const scale = PNG_SCALE;
-  const img = new Image();
-  img.onload = function() {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width * scale;
-    canvas.height = img.height * scale;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(function(blob) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${NETWORK_TYPE}_${new Date().toISOString().slice(0,10)}.png`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 'image/png');
-  };
-  img.onerror = function() { alert('PNG export failed — SVG render error'); };
-  img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)));
+  syncExportUI();
 }
 
 
@@ -864,164 +846,400 @@ function downloadTable() {
   URL.revokeObjectURL(url);
 }
 
-function buildVectorSVGString(includeLegend) {
-  const positions = network.getPositions();
-  const nodesDS = network.body.data.nodes;
-  const edgesDS = network.body.data.edges;
-  const visibleIds = new Set(nodesDS.get().filter(n => !n.hidden).map(n => n.id));
-  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
-  Object.entries(positions).forEach(([id, p]) => {
-    if (!visibleIds.has(id)) return;
-    if (p.x < minX) minX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y > maxY) maxY = p.y;
-  });
-  if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 100; maxY = 100; }
-  const pad = 80;
-  const contentW = (maxX - minX) + 2*pad;
-  const contentH = (maxY - minY) + 2*pad;
-  const vbX = minX - pad, vbY = minY - pad, vbW = contentW, vbH = contentH;
-  const outW = parseInt(document.getElementById('netWidth').value) || 1400;
-  const outH = parseInt(document.getElementById('netHeight').value) || 900;
-  const legScale = outW / contentW; // rendered px per viewBox unit
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="${outW}" height="${outH}">`;
-  svg += `<style>text { font-family: sans-serif; }</style>`;
-  const fs = parseInt(document.getElementById('fontSize').value) || 14;
-  const efs = Math.max(7, fs - 3);
-  // Edges with Bezier curves
-  edgesDS.forEach(edge => {
-    if (edge.hidden) return;
-    const from = positions[edge.from], to = positions[edge.to];
-    if (!from || !to) return;
-    const color = edge.color || '#888';
-    const width = Math.max(0.5, edge.width || 1);
-    const hasArrow = edge.arrows && edge.arrows.to && edge.arrows.to.enabled;
-    const dx = to.x - from.x, dy = to.y - from.y;
-    const len = Math.sqrt(dx*dx + dy*dy) || 1;
-    const offset = len * 0.15;
-    const perpX = -dy/len * offset, perpY = dx/len * offset;
-    const ctrlX = (from.x + to.x)/2 + perpX, ctrlY = (from.y + to.y)/2 + perpY;
-    svg += `<path d="M ${from.x} ${from.y} Q ${ctrlX} ${ctrlY} ${to.x} ${to.y}" stroke="${color}" stroke-width="${width}" fill="none" />`;
-    // Arrow at node edge
-    if (hasArrow) {
-      const targetNode = nodesDS.get(edge.to);
-      const targetSize = targetNode ? Math.max(3, targetNode.size || 15) : 15;
-      const tanX = to.x - ctrlX, tanY = to.y - ctrlY;
-      const tanLen = Math.sqrt(tanX*tanX + tanY*tanY) || 1;
-      const ux = tanX/tanLen, uy = tanY/tanLen;
-      const tipX = to.x - ux*targetSize, tipY = to.y - uy*targetSize;
-      const asize = 6 + width * 1.5;
-      const bx = tipX - ux*asize, by = tipY - uy*asize;
-      const px = -uy*asize/2, py = ux*asize/2;
-      svg += `<polygon points="${tipX},${tipY} ${bx+px},${by+py} ${bx-px},${by-py}" fill="${color}" />`;
-    }
-    if (edge.label) {
-      const lx = 0.25*from.x + 0.5*ctrlX + 0.25*to.x;
-      const ly = 0.25*from.y + 0.5*ctrlY + 0.25*to.y;
-      svg += `<text x="${lx}" y="${ly-3}" font-size="${efs}" text-anchor="middle" fill="#333">${escapeXml(edge.label)}</text>`;
-    }
-  });
-  // Nodes
-  nodesDS.forEach(node => {
-    const pos = positions[node.id];
-    if (!pos || node.hidden) return;
-    const color = node.color || '#ccc';
-    const size = Math.max(3, node.size || 15);
-    if (node._isClass || node.shape === 'square') {
-      svg += `<rect x="${pos.x-size}" y="${pos.y-size}" width="${size*2}" height="${size*2}" fill="${color}" stroke="#333" stroke-width="1" rx="2" />`;
-      const pv = classPValue(node.title);
-      if (pv) {
-        const pfs = Math.max(8, Math.min(12, size * 0.34)).toFixed(1);
-        svg += `<text x="${pos.x}" y="${pos.y + pfs * 0.35}" font-size="${pfs}" font-weight="600" text-anchor="middle" fill="#213042">${escapeXml(pv)}</text>`;
-      }
-    } else {
-      svg += `<circle cx="${pos.x}" cy="${pos.y}" r="${size}" fill="${color}" stroke="#333" stroke-width="1" />`;
-    }
-    if (node.label) {
-      svg += `<text x="${pos.x}" y="${pos.y + size + 12}" font-size="${(node.font && node.font.size) || 12}" text-anchor="middle">${escapeXml(node.label)}</text>`;
-    }
-  });
-  if (includeLegend) {
-  // Legend mirroring the on-screen HTML one: same px metrics (pad 6/10, line-height 1.6, swatch 14, gap 6)
-  const legendFs = parseInt(document.getElementById('legendFontSize').value) || 11;
-  const entries = getLegendItems();
-  const px = v => v / legScale; // screen px -> viewBox units
-  const boxW = document.getElementById('legend').getBoundingClientRect().width || 180;
-  const legendX = vbX + vbW - px(boxW) - px(9); // legend right:10px minus 1px canvas border
-  const legendY = vbY + px(9);                  // legend top:10px minus 1px canvas border
-  const lh = legendFs * 1.6;
-  const hh = (legendFs - 1) * 1.6;
-  const X = 10; // box horizontal padding
-  let yy = 6;   // box vertical padding
-  let content = '';
-  const text = (tx, cy, s, size, bold) => {
-    content += `<text x="${legendX + px(tx)}" y="${legendY + px(cy + size*0.35)}" font-size="${px(size)}" ${bold ? 'font-weight="bold" ' : ''}text-anchor="start" fill="#333">${escapeXml(s)}</text>`;
-  };
-  entries.forEach(it => {
-    if (it.t === 'header') {
-      text(X, yy + hh/2, it.label, legendFs - 1, true);
-      yy += hh + 2;
-    } else if (it.t === 'section') {
-      yy += 4;
-      content += `<line x1="${legendX + px(X)}" y1="${legendY + px(yy)}" x2="${legendX + px(boxW - X)}" y2="${legendY + px(yy)}" stroke="#ddd" stroke-width="${px(1)}" />`;
-      yy += 4;
-      text(X, yy + hh/2, it.label, legendFs - 1, true);
-      yy += hh + 2;
-    } else if (it.t === 'swatch') {
-      yy += 2; const cy = yy + lh/2;
-      if (it.shape === 'circle') {
-        content += `<circle cx="${legendX + px(X + 7)}" cy="${legendY + px(cy)}" r="${px(7)}" fill="${it.color}" stroke="#333" stroke-width="${px(1)}" />`;
-      } else {
-        content += `<rect x="${legendX + px(X)}" y="${legendY + px(cy - 7)}" width="${px(14)}" height="${px(14)}" fill="${it.color}" stroke="#333" stroke-width="${px(1)}" />`;
-      }
-      text(X + 20, cy, it.label, legendFs, false);
-      yy += lh + 2;
-    } else if (it.t === 'arrow') {
-      yy += 2; const cy = yy + lh/2;
-      content += `<line x1="${legendX + px(X)}" y1="${legendY + px(cy)}" x2="${legendX + px(X + 20)}" y2="${legendY + px(cy)}" stroke="${it.color}" stroke-width="${px(2)}" />`;
-      content += `<polygon points="${legendX + px(X + 24)},${legendY + px(cy)} ${legendX + px(X + 18)},${legendY + px(cy - 4)} ${legendX + px(X + 18)},${legendY + px(cy + 4)}" fill="${it.color}" />`;
-      text(X + 30, cy, it.label, legendFs, false);
-      yy += lh + 2;
-    } else if (it.t === 'line') {
-      yy += 2; const cy = yy + lh/2;
-      content += `<line x1="${legendX + px(X)}" y1="${legendY + px(cy)}" x2="${legendX + px(X + 24)}" y2="${legendY + px(cy)}" stroke="${it.color}" stroke-width="${px(2)}" />`;
-      text(X + 30, cy, it.label, legendFs, false);
-      yy += lh + 2;
-    } else if (it.t === 'heatmap') {
-      yy += 4;
-      text(X, yy + 8, it.label, 10, false);
-      yy += 17;
-      const stops = it.stops || [it.low, it.mid, it.high];
-      const cy = yy + 7, barW = 60, downOff = 34, barX = X + downOff, upX = barX + barW + 4;
-      text(X, cy, 'Down', 9, false);
-      const gid = 'lg' + it.label.replace(/\W/g, '');
-      content += `<linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0">` + stops.map((c, i) => `<stop offset="${(i / (stops.length - 1)).toFixed(3)}" stop-color="${c}" />`).join('') + `</linearGradient>`;
-      content += `<rect x="${legendX + px(barX)}" y="${legendY + px(cy - 5)}" width="${px(barW)}" height="${px(10)}" fill="url(#${gid})" stroke="#333" stroke-width="${px(1)}" />`;
-      text(upX, cy, 'Up', 9, false);
-      yy += 15;
-    }
-  });
-  svg += `<rect x="${legendX}" y="${legendY}" width="${px(boxW)}" height="${px(yy + 6)}" fill="rgba(255,255,255,0.95)" stroke="#999" stroke-width="${px(1)}" rx="${px(4)}" />`;
-  svg += content;
+// ----- Export: replay the displayed canvas as real vector geometry -----
+// vis-network only paints to a canvas, so grabbing it would rasterise the figure
+// (blurry labels) and take the zoom buttons with it. Instead we record the draw
+// calls vis makes for the current view - positions, node sizes, line widths,
+// arrow scale, colours, fonts, hidden nodes, zoom and pan - and replay them as
+// SVG. The legend overlay is rebuilt in SVG from the live DOM.
+const figureExport = (function () {
+  const RECORDED = ['save', 'restore', 'beginPath', 'closePath', 'moveTo', 'lineTo',
+    'quadraticCurveTo', 'bezierCurveTo', 'arc', 'arcTo', 'rect', 'ellipse', 'fill',
+    'stroke', 'fillText', 'strokeText', 'translate', 'rotate', 'scale', 'transform',
+    'setTransform', 'resetTransform', 'setLineDash', 'fillRect', 'strokeRect',
+    'clearRect', 'clip'];
 
+  function snapshot(ctx) {
+    return {
+      fill: ctx.fillStyle, stroke: ctx.strokeStyle, lw: ctx.lineWidth,
+      font: ctx.font, ta: ctx.textAlign, tb: ctx.textBaseline,
+      alpha: ctx.globalAlpha, cap: ctx.lineCap, join: ctx.lineJoin
+    };
   }
-svg += `</svg>`;
-  return svg;
+
+  function record(draw) {
+    const proto = CanvasRenderingContext2D.prototype;
+    const ops = [];
+    const orig = {};
+    RECORDED.forEach(function (name) {
+      orig[name] = proto[name];
+      proto[name] = function () {
+        ops.push({ op: name, a: Array.prototype.slice.call(arguments), s: snapshot(this) });
+        return orig[name].apply(this, arguments);
+      };
+    });
+    try { draw(); } finally { RECORDED.forEach(function (n) { proto[n] = orig[n]; }); }
+    return ops;
+  }
+
+  function mul(m, t) {
+    return [m[0] * t[0] + m[2] * t[1], m[1] * t[0] + m[3] * t[1],
+            m[0] * t[2] + m[2] * t[3], m[1] * t[2] + m[3] * t[3],
+            m[0] * t[4] + m[2] * t[5] + m[4], m[1] * t[4] + m[3] * t[5] + m[5]];
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function r3(v) { return Math.round(v * 1000) / 1000; }
+
+  function fontBits(font) {
+    const size = (/([0-9.]+)px/.exec(font) || [0, 12])[1];
+    const family = (/([0-9.]+)px\s+(.+)$/.exec(font) || [0, '', 'sans-serif'])[2];
+    return {
+      size: parseFloat(size),
+      family: family.replace(/["']/g, '').trim() || 'sans-serif',
+      bold: /bold/i.test(font),
+      italic: /italic/i.test(font)
+    };
+  }
+
+  // SVG 1.1 has no rgba(): split it into a solid colour plus opacity.
+  function color(c) {
+    const m = /^rgba?\(\s*([0-9.]+)[,\s]+([0-9.]+)[,\s]+([0-9.]+)(?:[,\s/]+([0-9.]+))?\s*\)$/.exec(String(c));
+    if (!m) { return { c: String(c), a: 1 }; }
+    return { c: 'rgb(' + m[1] + ',' + m[2] + ',' + m[3] + ')',
+             a: m[4] === undefined ? 1 : parseFloat(m[4]) };
+  }
+
+  let mctx = null;
+  function metrics(font, text) {
+    if (!mctx) { mctx = document.createElement('canvas').getContext('2d'); }
+    mctx.font = font;
+    const mm = mctx.measureText(text);
+    let asc = mm.fontBoundingBoxAscent, desc = mm.fontBoundingBoxDescent;
+    if (asc == null || desc == null) {
+      asc = (parseFloat(font) || 12) * 0.8; desc = (parseFloat(font) || 12) * 0.2;
+    }
+    return { asc: asc, desc: desc };
+  }
+
+  function render(ops) {
+    let m = [1, 0, 0, 1, 0, 0];
+    const stack = [];
+    const out = [];
+    let d = '';
+    let dash = [];
+    let moved = true;
+
+    function T() { return ' transform="matrix(' + m.map(r3).join(',') + ')"'; }
+    function pt(x, y) { return r3(x) + ' ' + r3(y); }
+    function fillOpacity(c, s) {
+      const a = c.a * (s.alpha == null ? 1 : s.alpha);
+      return a < 1 ? ' fill-opacity="' + r3(a) + '"' : '';
+    }
+    function strokeOpacity(c, s) {
+      const a = c.a * (s.alpha == null ? 1 : s.alpha);
+      return a < 1 ? ' stroke-opacity="' + r3(a) + '"' : '';
+    }
+
+    function arcSeg(x, y, rx, ry, rot, a0, a1, ccw) {
+      const full = Math.abs(a1 - a0) >= 2 * Math.PI - 1e-9;
+      const sx = x + rx * Math.cos(a0), sy = y + ry * Math.sin(a0);
+      if (moved || !d) { d += 'M ' + pt(sx, sy); moved = false; } else { d += ' L ' + pt(sx, sy); }
+      const deg = r3(rot * 180 / Math.PI);
+      if (full) {
+        const mx = x + rx * Math.cos(a0 + Math.PI), my = y + ry * Math.sin(a0 + Math.PI);
+        d += ' A ' + r3(rx) + ' ' + r3(ry) + ' ' + deg + ' 1 1 ' + pt(mx, my);
+        d += ' A ' + r3(rx) + ' ' + r3(ry) + ' ' + deg + ' 1 1 ' + pt(sx, sy);
+      } else {
+        let sweep = a1 - a0;
+        if (ccw) { if (sweep > 0) { sweep -= 2 * Math.PI; } } else if (sweep < 0) { sweep += 2 * Math.PI; }
+        const ex = x + rx * Math.cos(a1), ey = y + ry * Math.sin(a1);
+        d += ' A ' + r3(rx) + ' ' + r3(ry) + ' ' + deg + ' '
+          + (Math.abs(sweep) > Math.PI ? 1 : 0) + ' ' + (sweep > 0 ? 1 : 0) + ' ' + pt(ex, ey);
+      }
+    }
+
+    ops.forEach(function (o) {
+      const a = o.a, s = o.s;
+      switch (o.op) {
+        case 'save': stack.push(m.slice()); break;
+        case 'restore': if (stack.length) { m = stack.pop(); } break;
+        case 'translate': m = mul(m, [1, 0, 0, 1, a[0], a[1]]); break;
+        case 'scale': m = mul(m, [a[0], 0, 0, a[1], 0, 0]); break;
+        case 'rotate': m = mul(m, [Math.cos(a[0]), Math.sin(a[0]), -Math.sin(a[0]), Math.cos(a[0]), 0, 0]); break;
+        case 'transform': m = mul(m, a); break;
+        case 'setTransform': m = a.length === 6 ? a.slice() : [1, 0, 0, 1, 0, 0]; break;
+        case 'resetTransform': m = [1, 0, 0, 1, 0, 0]; break;
+        case 'beginPath': d = ''; moved = true; break;
+        case 'closePath': if (d) { d += ' Z'; moved = true; } break;
+        case 'moveTo': d += ' M ' + pt(a[0], a[1]); moved = false; break;
+        case 'lineTo': d += ' L ' + pt(a[0], a[1]); break;
+        case 'quadraticCurveTo': d += ' Q ' + pt(a[0], a[1]) + ' ' + pt(a[2], a[3]); break;
+        case 'bezierCurveTo': d += ' C ' + pt(a[0], a[1]) + ' ' + pt(a[2], a[3]) + ' ' + pt(a[4], a[5]); break;
+        case 'arc': arcSeg(a[0], a[1], a[2], a[2], 0, a[3], a[4], a[5]); break;
+        case 'arcTo': d += ' L ' + pt(a[0], a[1]); break;
+        case 'ellipse': arcSeg(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]); break;
+        case 'rect':
+          d += ' M ' + pt(a[0], a[1]) + ' H ' + r3(a[0] + a[2]) + ' V ' + r3(a[1] + a[3])
+            + ' H ' + r3(a[0]) + ' Z'; moved = true; break;
+        case 'setLineDash': dash = a[0] || []; break;
+        case 'fill': {
+          if (!d) { break; }
+          const fc = color(s.fill);
+          out.push('<path d="' + d + '" fill="' + esc(fc.c) + '"' + fillOpacity(fc, s) + T() + '/>');
+          break;
+        }
+        case 'stroke': {
+          if (!d) { break; }
+          const sc = color(s.stroke);
+          out.push('<path d="' + d + '" fill="none" stroke="' + esc(sc.c)
+            + '" stroke-width="' + r3(s.lw) + '"'
+            + (dash.length ? ' stroke-dasharray="' + dash.join(' ') + '"' : '')
+            + (s.cap !== 'butt' ? ' stroke-linecap="' + s.cap + '"' : '')
+            + (s.join !== 'miter' ? ' stroke-linejoin="' + s.join + '"' : '')
+            + strokeOpacity(sc, s) + T() + '/>');
+          break;
+        }
+        case 'fillText': case 'strokeText': {
+          const f = fontBits(s.font);
+          const anchor = s.ta === 'center' ? 'middle' : (s.ta === 'right' || s.ta === 'end') ? 'end' : 'start';
+          const mm = metrics(s.font, a[0]);
+          const dy = { middle: (mm.asc - mm.desc) / 2, top: mm.asc, hanging: mm.asc,
+                       bottom: -mm.desc, ideographic: -mm.desc }[s.tb] || 0;
+          const tc = color(o.op === 'fillText' ? s.fill : s.stroke);
+          let body = '<text x="' + r3(a[1]) + '" y="' + r3(a[2] + dy) + '" font-family="' + esc(f.family)
+            + '" font-size="' + r3(f.size) + '"' + (f.bold ? ' font-weight="bold"' : '')
+            + (f.italic ? ' font-style="italic"' : '')
+            + ' text-anchor="' + anchor + '"';
+          if (o.op === 'fillText') {
+            body += ' fill="' + esc(tc.c) + '"' + fillOpacity(tc, s) + T() + '>' + esc(a[0]) + '</text>';
+          } else {
+            body += ' fill="none" stroke="' + esc(tc.c) + '" stroke-width="' + r3(s.lw)
+              + '" stroke-linejoin="round"' + strokeOpacity(tc, s) + T() + '>' + esc(a[0]) + '</text>';
+          }
+          out.push(body);
+          break;
+        }
+        case 'fillRect': {
+          const fr = color(s.fill);
+          out.push('<rect x="' + r3(a[0]) + '" y="' + r3(a[1]) + '" width="' + r3(a[2])
+            + '" height="' + r3(a[3]) + '" fill="' + esc(fr.c) + '"' + fillOpacity(fr, s) + T() + '/>');
+          break;
+        }
+        case 'strokeRect': {
+          const sr = color(s.stroke);
+          out.push('<rect x="' + r3(a[0]) + '" y="' + r3(a[1]) + '" width="' + r3(a[2])
+            + '" height="' + r3(a[3]) + '" fill="none" stroke="' + esc(sr.c)
+            + '" stroke-width="' + r3(s.lw) + '"' + strokeOpacity(sr, s) + T() + '/>');
+          break;
+        }
+        default: break;   // clearRect, clip: the viewBox does the cropping
+      }
+    });
+    return out.join('');
+  }
+
+  // ---- legend: the HTML overlay, redrawn as SVG -------------------------
+  function parseGradient(str) {
+    const stops = [];
+    const re = /rgba?\([^)]*\)|#[0-9a-fA-F]{3,8}/g;
+    let mm;
+    while ((mm = re.exec(str))) { stops.push(mm[0]); }
+    return stops;
+  }
+
+  function legendSvg(base) {
+    const box = document.getElementById('legend');
+    if (!box) { return ''; }
+    const r = box.getBoundingClientRect();
+    const x = r.left - base.left, y = r.top - base.top;
+    const out = [];
+    out.push('<rect x="' + r3(x) + '" y="' + r3(y) + '" width="' + r3(r.width) + '" height="'
+      + r3(r.height) + '" rx="4" fill="rgba(255,255,255,0.95)" stroke="#999" stroke-width="1"/>');
+
+    const els = box.querySelectorAll('*');
+    Array.prototype.forEach.call(els, function (el) {
+      const cs = getComputedStyle(el);
+      const b = el.getBoundingClientRect();
+      const w = b.width, h = b.height;
+      if (w <= 0 || h <= 0) { return; }
+      const left = b.left - base.left, top = b.top - base.top;
+
+      const bgImg = cs.backgroundImage || '';
+      if (bgImg.indexOf('gradient') >= 0) {
+        const cols = parseGradient(bgImg);
+        if (cols.length) {
+          const gid = 'lg' + out.length;
+          out.push('<defs><linearGradient id="' + gid + '" x1="0" x2="1">'
+            + cols.map(function (c, i) {
+                return '<stop offset="' + r3(i / Math.max(1, cols.length - 1))
+                  + '" stop-color="' + esc(c) + '"/>';
+              }).join('') + '</linearGradient></defs>');
+          out.push('<rect x="' + r3(left) + '" y="' + r3(top) + '" width="' + r3(w) + '" height="' + r3(h)
+            + '" fill="url(#' + gid + ')" stroke="#333" stroke-width="1"/>');
+        }
+      } else if (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+        out.push('<rect x="' + r3(left) + '" y="' + r3(top) + '" width="' + r3(w) + '" height="' + r3(h)
+          + '" rx="' + r3(parseFloat(cs.borderTopLeftRadius) || 0) + '" fill="' + esc(cs.backgroundColor)
+          + '" stroke="#333" stroke-width="1"/>');
+      }
+
+      const btw = parseFloat(cs.borderTopWidth) || 0;
+      if (btw > 0 && cs.borderTopStyle === 'solid' && h <= btw + 2 && w > h) {
+        out.push('<line x1="' + r3(left) + '" y1="' + r3(top + h / 2) + '" x2="' + r3(left + w)
+          + '" y2="' + r3(top + h / 2) + '" stroke="' + esc(cs.borderTopColor)
+          + '" stroke-width="' + r3(btw) + '"/>');
+      }
+
+      const blw = parseFloat(cs.borderLeftWidth) || 0;
+      if (blw > 0 && cs.borderLeftStyle === 'solid' && w <= blw + 2 && h > w
+          && (parseFloat(cs.borderTopWidth) || 0) > 0) {
+        out.push('<polygon points="' + r3(left + w) + ',' + r3(top + h / 2) + ' '
+          + r3(left) + ',' + r3(top) + ' ' + r3(left) + ',' + r3(top + h)
+          + '" fill="' + esc(cs.borderLeftColor) + '"/>');
+      }
+
+      Array.prototype.forEach.call(el.childNodes, function (node) {
+        if (node.nodeType !== 3 || !node.textContent.trim()) { return; }
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const tr = range.getClientRects()[0];
+        if (!tr) { return; }
+        const fs = parseFloat(cs.fontSize) || 11;
+        const bold = cs.fontWeight === 'bold' || parseInt(cs.fontWeight, 10) >= 600;
+        const mm = metrics((bold ? 'bold ' : '') + fs + 'px ' + cs.fontFamily, node.textContent);
+        out.push('<text x="' + r3(tr.left - base.left) + '" y="'
+          + r3(tr.top - base.top + (tr.height - (mm.asc + mm.desc)) / 2 + mm.asc)
+          + '" font-family="' + esc(cs.fontFamily) + '" font-size="' + r3(fs) + '"'
+          + (bold ? ' font-weight="bold"' : '') + ' fill="' + esc(cs.color) + '">'
+          + esc(node.textContent.replace(/\s+/g, ' ').trim()) + '</text>');
+      });
+    });
+    return out.join('');
+  }
+
+  // ---- assemble the SVG for the current view ----------------------------
+  function svg() {
+    const canvas = document.querySelector('#mynetwork canvas');
+    if (!canvas) { throw new Error('network canvas not found'); }
+    const W = canvas.clientWidth || canvas.width;
+    const H = canvas.clientHeight || canvas.height;
+    const pr = canvas.width / W;   // retina backing store, if any
+
+    const ops = record(function () { network.redraw(); });
+    if (!ops.length) { throw new Error('vis-network drew nothing - nothing to export'); }
+
+    const base = document.getElementById('networkWrapper').getBoundingClientRect();
+    const body = render(ops);
+    const legend = legendSvg(base);
+
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H
+      + '" viewBox="0 0 ' + W + ' ' + H + '">'
+      + '<rect width="' + W + '" height="' + H + '" fill="#ffffff"/>'
+      + '<g transform="scale(' + r3(1 / pr) + ')">' + body + '</g>'
+      + legend
+      + '<rect x="0.5" y="0.5" width="' + r3(W - 1) + '" height="' + r3(H - 1)
+      + '" fill="none" stroke="#ccc" stroke-width="1"/>'
+      + '</svg>';
+  }
+
+  function raster(svgText, scale) {
+    return new Promise(function (resolve, reject) {
+      const box = /<svg[^>]*width="([0-9.]+)"[^>]*height="([0-9.]+)"/.exec(svgText) || [0, 1200, 700];
+      const img = new Image();
+      img.onload = function () {
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(parseFloat(box[1]) * scale));
+        c.height = Math.max(1, Math.round(parseFloat(box[2]) * scale));
+        const g = c.getContext('2d');
+        g.fillStyle = '#ffffff';
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        resolve(c);
+      };
+      img.onerror = function () { reject(new Error('could not rasterise the SVG')); };
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+    });
+  }
+
+  return { svg: svg, raster: raster };
+})();
+
+function syncExportUI() {
+  const active = document.querySelector('#fmtSeg .seg-btn.active');
+  const fmt = (active && active.dataset.fmt) || 'svg';
+  const row = document.getElementById('pngScaleRow');
+  if (row) row.style.display = fmt === 'png' ? '' : 'none';
+  const lbl = document.getElementById('dpiScaleVal');
+  if (lbl) lbl.textContent = String(exportScale());
 }
 
-function exportSVGVector() {
-  const svgStr = buildVectorSVGString(true);
-  const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+function exportScale() {
+  const el = document.getElementById('dpiScale');
+  return Math.min(10, Math.max(1, parseInt(el && el.value, 10) || 1));
+}
+
+function captureFigure(scale) {
+  const svg = figureExport.svg();
+  return figureExport.raster(svg, scale);
+}
+
+function saveBlob(blob, name) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${NETWORK_TYPE}_${new Date().toISOString().slice(0,10)}_vector.svg`;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
 }
 
+function figureName(ext) {
+  const mode = CURRENT_MODE ? '_' + CURRENT_MODE : '';
+  return NETWORK_TYPE + mode + '_' + new Date().toISOString().slice(0, 10) + '.' + ext;
+}
 
+function previewExport() {
+  const active = document.querySelector('#fmtSeg .seg-btn.active');
+  const fmt = (active && active.dataset.fmt) || 'svg';
+  const scale = fmt === 'png' ? exportScale() : 2;
+  captureFigure(Math.min(2, scale)).then(function (canvas) {
+    document.getElementById('previewNote').textContent = fmt === 'png'
+      ? 'PNG - exactly what the page shows, rasterised at ' + scale + '\u00d7.'
+      : 'SVG - exactly what the page shows, as editable vector geometry.';
+    document.getElementById('previewImg').src = canvas.toDataURL('image/png');
+    document.getElementById('previewModal').style.display = 'block';
+  }).catch(function (err) {
+    alert('Preview failed: ' + err.message);
+  });
+}
+
+function closePreview() { document.getElementById('previewModal').style.display = 'none'; }
+
+function downloadFigure() {
+  const active = document.querySelector('#fmtSeg .seg-btn.active');
+  const fmt = (active && active.dataset.fmt) || 'svg';
+  try {
+    if (fmt === 'svg') {
+      saveBlob(new Blob([figureExport.svg()], { type: 'image/svg+xml' }), figureName('svg'));
+      return;
+    }
+    captureFigure(exportScale()).then(function (canvas) {
+      canvas.toBlob(function (blob) { saveBlob(blob, figureName('png')); }, 'image/png');
+    }).catch(function (err) {
+      alert('Export failed: ' + err.message);
+    });
+  } catch (err) {
+    alert('Export failed: ' + err.message);
+  }
+}
+
+syncExportUI();
 
 function legendSwatch(shape, color, label) {
   const s = shape === 'square' ? 'border-radius:0' : (shape === 'circle' ? 'border-radius:50%' : 'border-radius:0');
